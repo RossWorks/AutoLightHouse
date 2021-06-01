@@ -1,0 +1,8 @@
+{
+    "configuration": "cpu=atmega2560",
+    "board": "arduino:avr:mega",
+    "sketch": "AutoLightHouse.ino",
+    "output": "C:/Program Files/Arduino/build",
+    "programmer": "avrisp",
+    "port": "COM4"
+}
