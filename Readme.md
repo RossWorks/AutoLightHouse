@@ -1,5 +1,5 @@
 # Automatic Lighthouse System (ALS)
-<<<<<<< HEAD
+
 ## Introduction
 
 This project is an exercise to improve Arduino skills in programing a self sufficient unit.<br>
