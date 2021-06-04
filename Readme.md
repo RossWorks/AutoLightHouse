@@ -1,4 +1,5 @@
 # Automatic Lighthouse System (ALS)
+<<<<<<< HEAD
 ## Introduction
 
 This project is an exercise to improve Arduino skills in programing a self sufficient unit.<br>
@@ -23,3 +24,4 @@ A dedicated pdf file illustrates how to operate and program the ALS via bluetoot
 
 ## Code documentation
 Code documentation is available within the code and in dedicated pdf documentation, created via Doxygen.
+=======
