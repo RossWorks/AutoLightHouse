@@ -119,13 +119,21 @@ char LogfileName[13]="logfile.dat"; //current logfile (8.3 name convention)
 char LanternFile[13]="DEFAULT.LNT"; //current lantern file (8.3 filename)
 byte Lantern[LNT_LEN]={3}; //current lantern pattern (1 byte/second)
 
-//Time zone rules (personal algorithm)
-//n-th week of month,n-th day of week,n-th month,n-th hour of day,UTC offset
-//first the start time of DST,then the end of DST (default @ start is CEST)
+/*
+n-th week of month,n-th day of week,n-th month,n-th hour of day,UTC offset
+first the start time of DST,then the end of DST (default @ start is CEST)
+*/
 byte DST[10]={0,0,3,1,120,0,0,10,2,60};
 char StdTime[5]="CET", DstTime[5]="CEST";
 
 int BMP180read(float *outT, float *outp){
+	/**
+	 * @brief Reads presure and temperature data from BMP180
+	 * @param outT variable containing temperature output
+	 * @param outp variable containing pressure output
+	 * @return 1 if data are collected correctly, 0 otherwise
+	 * @author RossWorks
+	 */
 	byte status; //byte of millis to wait
 	double T=0,p=0; //temp variables
 	status = BMP180.startTemperature(); //start T reading, will have to wait
@@ -244,8 +252,16 @@ byte ChangeLANT(const char *InputChars){
 }
 
 void deg2coords(const double INdegr, int *deg,int *min,int *sec){
-	/*this functions translates a ###.#######° information in a ###°##' ##''
-	information*/
+	/**
+	 * this functions translates a ###.#######° information in a ###°##' ##''
+	 * information
+	 * @brief transform degrees-only into degree-minute-second coordinate 
+	 * @param INdegr Input for degree only coord
+	 * @param deg collects the integer part of input
+	 * @param min collects minutes of arc from input
+	 * @param sec collects seconds of arc from input
+	 * @author RossWorks
+	 */
 	float Aux=0;
 	*deg=trunc(INdegr); //isolating degree infrmation as the integer part 
 	Aux=INdegr-*deg; //isolating decimal part of the degree original value
