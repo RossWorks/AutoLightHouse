@@ -115,9 +115,9 @@ PROGMEM const char DefaultDSTFile[13]="ZULU.DST";
 int GPSfix[7]={-360,61,61/*latitude*/,+360,61,61/*longitude*/,-1000/*height*/};
 unsigned int InstrStatus=0;
 unsigned long LastLCDWrite=0;
-char LogfileName[13]="logfile.dat"; //current logfile (8.3 name convention)
-char LanternFile[13]="DEFAULT.LNT"; //current lantern file (8.3 filename)
-byte Lantern[LNT_LEN]={3}; //current lantern pattern (1 byte/second)
+char LogfileName[13]="logfile.dat"; /**current logfile (8.3 name convention)*/
+char LanternFile[13]="DEFAULT.LNT"; /**current lantern file (8.3 filename)*/
+byte Lantern[LNT_LEN]={3}; /**current lantern pattern (1 byte/second)*/
 
 /*
 n-th week of month,n-th day of week,n-th month,n-th hour of day,UTC offset
@@ -251,6 +251,13 @@ byte ChangeLANT(const char *InputChars){
 	return 0;
 }
 
+void ClearSerial(Stream *SerialPort){
+	char dummy='\0';
+	while(SerialPort->available()>0){
+		dummy=SerialPort->read();
+	}
+}
+
 void deg2coords(const double INdegr, int *deg,int *min,int *sec){
 	/**
 	 * this functions translates a ###.#######° information in a ###°##' ##''
@@ -339,6 +346,13 @@ void DSTperiod(const int year,DateTime *Start,DateTime *End){//ALL OK
 }
 
 int GetGPSFix(int *position,unsigned int *time){ //ALL OK
+/**
+ * @brief this functions interpellates the GPS to get location fix & ZULU time
+ * @return 1 if Fix is obtained, 0 if not
+ * @param position array containing latitude & longitude in float point degrees
+ * @param time array containing time info from year to seconds
+ * @author RossWorks
+ */
 	char c;
 	const unsigned long StartTime = millis();
 	float latf=0,lonf=0;
@@ -401,6 +415,11 @@ byte HandleStorage(char *Command){
 }
 
 byte LCDtest(){
+	/**
+	 * @brief Tests the LCD
+	 * @returns 1 is LCD tests OK, 0 otherwise
+	 * @author RossWorks
+	 */
 	byte error=0;
 	Wire.beginTransmission(LCDaddress);
 	error=Wire.endTransmission();
@@ -799,4 +818,5 @@ void loop(){
 			default: //fallback case
 				break;
 		}
+	ClearSerial(&Serial2);
 }
