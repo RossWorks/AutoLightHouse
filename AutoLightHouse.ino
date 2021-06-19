@@ -79,14 +79,14 @@ PROGMEM const char LogFileHeaderProto[]=
 PROGMEM const char LogFileHeaderProto2[] ="T\tp\tH\tdir\tspeed\tdate\ttime";
 
 //program mode messages
-PROGMEM const char BadCommand[]="Receveid invalid command\n";
+PROGMEM const char BadCommand[]="Received invalid command\n";
 PROGMEM const char EnterProgMode[]="Entering program mode...\n";
 PROGMEM const char File2prog[]="stored file\n";
 PROGMEM const char Serial2LNT[]="serial input\n";
 PROGMEM const char UpdateDone[]="updated\n";
 PROGMEM const char NoFile[]="No valid file detected\n";
 //lantern managing
-PROGMEM const char UpdateLNT[]="Updating lantern routine from";
+PROGMEM const char UpdateLNT[]="Updating lantern routine from ";
 PROGMEM const char LantFileUpdated[]="New lantern file is ";
 PROGMEM const char BadLant[]="Missing lantern string termination char\n";
 // DST rule managing
@@ -118,7 +118,6 @@ unsigned long LastLCDWrite=0;
 char LogfileName[13]="logfile.dat"; /**current logfile (8.3 name convention)*/
 char LanternFile[13]="DEFAULT.LNT"; /**current lantern file (8.3 filename)*/
 byte Lantern[LNT_LEN]={3}; /**current lantern pattern (1 byte/second)*/
-
 /*
 n-th week of month,n-th day of week,n-th month,n-th hour of day,UTC offset
 first the start time of DST,then the end of DST (default @ start is CEST)
@@ -403,9 +402,10 @@ byte HandleStorage(char *Command){
 			// if file pointer is null, print a warning and exit function
 			if (myFile==NULL){WritePGM2Serial(NoFile,&Serial2); return -1;}
 			while(myFile.available()>0){
-				myFile.read(buff,sizeof(char));
-				Serial2.print(buff);
+				Serial2.print(myFile.read());
 			}
+			Serial2.print("\n");
+			myFile.close();
 			break;
 		default:
 			WritePGM2Serial(BadCommand,&Serial2);
@@ -777,7 +777,7 @@ void loop(){
 /*-----------------------------Lantern Updating-------------------------------*/
 	UpdateLantern(NowToday.second());
 /*-----------------------------BT command reception---------------------------*/		
-	//if BT has data let'see what has to be done
+	//if BT serial interface has data let'see what has to be done
 	Answer[0]='\0'; //resetting answer string
 	//reading new bytes in serial buffer
 	while (Serial2.available()>0){*(BTinput+i)=Serial2.read();i++;}
@@ -806,6 +806,8 @@ void loop(){
 			case 'P': // Program mode to set the board w/o reprogramming
 				WritePGM2Serial(EnterProgMode, &Serial2);
 				ProgramMode(BTinput);
+				break;
+			case 'Q': //Q acts as a handshake between ALS and python GUI
 				break;
 			case 'S': //S for Status: how is the system doing?
 				SendInstrStatus();
