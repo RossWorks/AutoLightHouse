@@ -9,18 +9,22 @@ This works is based on Arduino Mega2560, more detailed documentation is provided
 
 ## Capabilities
 ALS is mostly autonomous in its operation: user interaction is required only when collecting gathered data or when resetting the unit due to its relocation.<br>The unit is capable of tolerating various abnormalities without freezing.  
-A brief list of ALS features:
+List of current ALS features:
 
-1. Automatic clock sync from <span style="color:lime">**GPS**</span> satellites
-2. Battery operated <span style="color:cyan">**RTC**</span> as time signal backup
-3. _9 V_ to _40 V_ input voltage thanks to internal linear voltage regulator
-4. <span style="color:blue">**Bluetooth**</span> wireless serial interface for data exchange and programming
-5. Quick reporting of weather data via LCD
-6. Storing of weather data on SD
-7. Programmable LED lightning
-
+* Automatic clock sync from <span style="color:lime">**GPS**</span> satellites
+* Battery operated <span style="color:orange">**RTC**</span> as time signal backup
+* _9 V_ to _40 V_ input voltage thanks to internal linear voltage regulator
+* <span style="color:blue">**Bluetooth**</span> wireless serial interface for data exchange and programming
+* Quick reporting of weather data via LCD
+* Storing of weather data on <span style="color:yellow">SD</span>
+* Programmable LED lightning
+* Remote software reboot
+  
 ## User guide
 A dedicated pdf file illustrates how to operate and program the ALS via bluetooth wireless interface.
 
-## Code documentation
-Code documentation is available within the code and in dedicated pdf documentation, created via Doxygen.
+## Under development
+* Upload/Download of file via Serial
+* Configurable settings via dedicated file on SD memory
+* User-friendly GUI
+* Code in-depth documentation
