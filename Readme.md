@@ -18,12 +18,13 @@ List of current ALS features:
 * Quick reporting of weather data via LCD
 * Storing of weather data on <span style="color:yellow">SD</span>
 * Programmable LED lightning
-* Remote software reboot
+
   
 ## User guide
 A dedicated pdf file illustrates how to operate and program the ALS via bluetooth wireless interface.
 
 ## Under development
+* Remote software reboot
 * Upload/Download of file via Serial
 * Configurable settings via dedicated file on SD memory
 * User-friendly GUI
