@@ -7,7 +7,6 @@
 #include <SPI.h>
 #include <SD.h>
 #include <Wire.h>
-#include <ArduinoJson.h>
 
 #define CS_PIN 49
 #define MOSI_PIN 51
@@ -19,9 +18,9 @@
 
 #define FAULT_PIN 30 //1st pin for fault-indicating led
 #define N_INSTR 6 //n° of instruments installed
-#define GPS_WAIT 5 //minutes the GPS has to get a (valid) fix
+#define GPS_WAIT 5 //fallback minutes the GPS has to get a (valid) fix
 #define LCD_CAPACITY 80 //char displayable by LCD (now is a 20x4)
-#define SAVE_INTERVAL 10 //every X-th minute of the hour report is written on SD
+#define SAVE_INTERVAL 10 //fallback every hour's X-th minute report saved on SD
 #define NAME_SIZE 4 //char size of instrument name
 #define LNT_LEN 60 //lenght of lantern instructions array
 #define LCDaddress 0x27 //I2C address of LCD
@@ -33,6 +32,11 @@
 #define DHT_INDEX 3
 #define LCD_INDEX 4
 #define SD_INDEX 5
+
+//index for setting storage on SD file ALS.DAT
+#define GPS_TIMEOUT_INDEX 0
+#define SD_SAVE_INDEX 1
+#define NAME_INDEX 2
 
 #define T_INDEX 0
 #define p_INDEX 1
@@ -60,6 +64,7 @@ File myFile; //file pointer to the only one file that can be opened at once
 PROGMEM const char Splash[] =
 		"Automatic LighthouseSystem              RossWorks 2020";
 PROGMEM const char ShutDownMessage[]="Ready for shutdown";
+PROGMEM const char RebootString[]="Rebooting System...";
 //GPS & RTC messages
 PROGMEM const char GPSStart[] = "Acquiring GPS signalplease wait";
 PROGMEM const char GPSOK[] = "GPS signal acquired syncing RTC";
@@ -67,11 +72,11 @@ PROGMEM const char GPSbadRTCok[] = "Poor GPS signal     Using RTC time";
 PROGMEM const char GPSbadRTCbad[] =
 	"No GPS signal       RTC lost power      Date and time       unreliable";
 PROGMEM const char GPSupdate[]="Updating GPS fix...";
-PROGMEM const char MyName[8] = "TAHU";
 //instrument reporting & naming
 PROGMEM const char Instruments[] = "GPS RTC BMP DHT LCD SD  ";//4 chars/instr
 PROGMEM const char NotWorkingEquip[] = "FAULT";
 PROGMEM const char WorkingEquip[] = "OK";
+PROGMEM const char FallBackName[]="ALSunit";
 //Time & logging reporting
 PROGMEM const char TimeString[] = "Today is DDD DD MMM YYYY hh:mm:ss ";
 PROGMEM const char LogFileHeaderProto[]=
@@ -85,6 +90,7 @@ PROGMEM const char File2prog[]="stored file\n";
 PROGMEM const char Serial2LNT[]="serial input\n";
 PROGMEM const char UpdateDone[]="updated\n";
 PROGMEM const char NoFile[]="No valid file detected\n";
+
 //lantern managing
 PROGMEM const char UpdateLNT[]="Updating lantern routine from ";
 PROGMEM const char LantFileUpdated[]="New lantern file is ";
@@ -93,7 +99,9 @@ PROGMEM const char BadLant[]="Missing lantern string termination char\n";
 PROGMEM const char UpdateDST[]="Updating DST rule from";
 PROGMEM const char BadDST[]="DST rule not compliant to standard\n";
 //mass memory managing
-PROGMEM const char EnterMemory[]="Accessing mass storage management";
+PROGMEM const char EnterMemory[]="Accessing mass storage management\n";
+PROGMEM const char BadIO[]="Unable to create requested file\n";
+PROGMEM const char RestartAdvise[]="Applying new settings require ALS reboot\n";
 
 //default DST rule (ZULU time)
 PROGMEM const byte DefTZ[10]={0,0,3,1,0,0,0,10,2,0};
@@ -114,7 +122,9 @@ PROGMEM const char DefaultDSTFile[13]="ZULU.DST";
 //global variables
 int GPSfix[7]={-360,61,61/*latitude*/,+360,61,61/*longitude*/,-1000/*height*/};
 unsigned int InstrStatus=0;
+byte SDinterval=SAVE_INTERVAL;
 unsigned long LastLCDWrite=0;
+char MyName[8+1] = "ALSunit";
 char LogfileName[13]="logfile.dat"; /**current logfile (8.3 name convention)*/
 char LanternFile[13]="DEFAULT.LNT"; /**current lantern file (8.3 filename)*/
 byte Lantern[LNT_LEN]={3}; /**current lantern pattern (1 byte/second)*/
@@ -344,7 +354,7 @@ void DSTperiod(const int year,DateTime *Start,DateTime *End){//ALL OK
 	*End=N2;
 }
 
-int GetGPSFix(int *position,unsigned int *time){ //ALL OK
+int GetGPSFix(int *position,unsigned int *time, byte GPStimeOut){//ALL OK
 /**
  * @brief this functions interpellates the GPS to get location fix & ZULU time
  * @return 1 if Fix is obtained, 0 if not
@@ -355,7 +365,7 @@ int GetGPSFix(int *position,unsigned int *time){ //ALL OK
 	char c;
 	const unsigned long StartTime = millis();
 	float latf=0,lonf=0;
-	while ((millis()-StartTime)<=(GPS_WAIT*6e4)){
+	while ((millis()-StartTime)<=(GPStimeOut*6e4)){
 	//Serial.println(GPS.sentencesWithFix()); //THE GPS WORKS!!!!!
 	/*I've decided to simply let the encode function work without updating any
 	warning to user, (LCD, Serial print, etc...) to ensure that the GPS routine 
@@ -389,10 +399,8 @@ int GetGPSFix(int *position,unsigned int *time){ //ALL OK
 byte HandleStorage(char *Command){
 	char FileName[13]={'\0'},buff='\0';
 	byte I=0;
-	switch (*Command+2){
-		case 'D': //act as dir command on DOS: list all files in SD
-			break;
-		case 'R': //Requesting a file to be sent over Serial
+	switch (*(Command+2)){
+		case 'D': //Download a file over Serial
 			for (I=0;I<13;I++){//reading filename requested
 				*(FileName+I)=*(Command+3+I);
 				if (*(FileName+I)== ';'){*(FileName+I)='\0'; break;}
@@ -402,10 +410,27 @@ byte HandleStorage(char *Command){
 			// if file pointer is null, print a warning and exit function
 			if (myFile==NULL){WritePGM2Serial(NoFile,&Serial2); return -1;}
 			while(myFile.available()>0){
-				Serial2.print(myFile.read());
+				Serial2.print((char)myFile.read());
 			}
 			Serial2.print("\n");
 			myFile.close();
+			break;
+		case 'U': //Upload a file via Serial
+			for (I=0;I<13;I++){//reading filename to be created
+				*(FileName+I)=*(Command+3+I);
+				if (*(FileName+I)== ';'){*(FileName+I)='\0'; break;}
+			}
+			*(FileName+12)='\0'; //EOS char at the end of the array for safety
+			myFile=SD.open(FileName,FILE_WRITE);
+			// if file pointer is null, print a warning and exit function
+			if (myFile==NULL){WritePGM2Serial(BadIO,&Serial2); return -1;}
+			while(Serial2.available()>0){
+				myFile.print(Serial2.read());
+			}
+			myFile.println('\0');
+			myFile.close();
+			// remind to restart ALS if a new ALS.DAT has been uploaded
+			WritePGM2Serial(RestartAdvise,&Serial2);
 			break;
 		default:
 			WritePGM2Serial(BadCommand,&Serial2);
@@ -435,8 +460,8 @@ byte LCDtest(){
 }
 
 int ProgramMode(const char *Command){
-/*this function reads the 2nd byte of the command to determine which parameter
-	is to be changed*/
+	/*this function reads the 2nd byte of the command to determine which 
+	parameter is to be changed*/
 	switch (*(Command+1)){
 		case 'D': // chabge DST settings
 			WritePGM2Serial(UpdateDST, &Serial2);
@@ -447,6 +472,7 @@ int ProgramMode(const char *Command){
 			ChangeLANT(Command);
 			break;
 		case 'M': // mass memory operation
+			WritePGM2Serial(EnterMemory,&Serial2);
 			HandleStorage(Command);
 			break;
 		default: //invalid command
@@ -470,6 +496,45 @@ before trying to read something from it*/
 	return 1;
 }
 
+byte ReadGPStimeout(){
+	if (bitRead(InstrStatus,SD_INDEX)==1){
+		myFile=SD.open(F("ALS.DAT"));
+		if (myFile != NULL){
+			myFile.seek(GPS_TIMEOUT_INDEX);
+			return myFile.read();
+			myFile.close();
+		}
+	}
+	return GPS_WAIT;
+}
+
+byte ReadName(char* Name){
+	char buff='\0';
+	byte I=0;
+	myFile=SD.open(F("ALS.DAT"),FILE_READ);
+	if (myFile != NULL){
+		myFile.seek(NAME_INDEX);
+		for (I=0;I<8;I++){
+			buff=myFile.read();
+			if (buff != EOF){*(Name+I)=buff;}
+		}
+		*(Name+8)='\0';
+		myFile.close();
+	}
+	return I;
+}
+
+byte ReadSDinterval(){
+	byte interval=SAVE_INTERVAL;
+	myFile=SD.open(F("ALS.DAT"));
+	if (myFile != NULL){
+		myFile.seek(SD_SAVE_INDEX);
+		interval=myFile.read();
+		myFile.close();
+	}
+	return interval;
+}
+
 void ReadFromPGM(char *pgm_pointer, char *outString){
 	char a=':'; byte i=0;
 	while (a!='\0'){
@@ -477,6 +542,8 @@ void ReadFromPGM(char *pgm_pointer, char *outString){
 		*(outString+i)=a;i++;
 	}
 }
+
+void(* resetFunc) (void) = 0;  // declare reset fuction at address 0
 
 void SendInstrStatus(){
 	byte i=0,j=0,k=0,h=0;
@@ -529,11 +596,12 @@ void ShutDown(){
 }
 
 byte UpdateGPS(){
-	byte esito=0;
+	byte esito=0,GPStimer=GPS_WAIT;
 	unsigned int DateAndTime[6]={0};
 	LCD1.clear();
 	WritePGM2LCD(GPSStart);
-	esito=GetGPSFix(GPSfix,DateAndTime);
+	GPStimer=ReadGPStimeout();
+	esito=GetGPSFix(GPSfix,DateAndTime,GPStimer);
 	if (esito==1){
 		RTC.adjust(DateTime(DateAndTime[0],DateAndTime[1],DateAndTime[2],
 						DateAndTime[3],DateAndTime[4],DateAndTime[5]));
@@ -656,7 +724,8 @@ void WritePositionReport(char *report){
 void setup(){
 	/*
 	1)Initialise/test every instruments/pin/serial/I2C/etc. + 
-	  display splashscreen + Lantern setting
+	  display splashscreen + Lantern setting + 
+	  reading, if posible, settings file ALS.DAT and apply said settings
 	2)Time & position phase
 	|-> 1)Read GPS location&time, flag if result valid within time limit.
 	|   GPS function saves position in global array. after use, GPS is shut off
@@ -670,7 +739,7 @@ void setup(){
 	   the log file is unique and updated every time
 	*/
 	unsigned int PresentDay[6]={0};
-	byte esito=0;
+	byte esito=0,GPStimer=GPS_WAIT;
 	bool IsDST=0;
 	DateTime NowToday(2000,1,1,0,0,0);
 	float WeatherData[3]={0};
@@ -694,14 +763,16 @@ void setup(){
 	//SD init, false if failure
 	if (SD.begin()){
 		bitWrite(InstrStatus,SD_INDEX,1);
-		ReadLightSetting();}
+		ReadLightSetting();
+		ReadName(MyName);}
 	else{bitWrite(InstrStatus,SD_INDEX,0);}
 	
 	//phase 2
-	if (bitRead(InstrStatus,LCD_INDEX)==1){
-	WritePGM2LCD(GPSStart);// I warn that we're waiting for GPS fix
-	}
-	esito=GetGPSFix(GPSfix,PresentDay); //saving fix and time
+	//try to get gps timeout setting
+	GPStimer=ReadGPStimeout();
+	// I warn that we're waiting for GPS fix
+	if (bitRead(InstrStatus,LCD_INDEX)==1){WritePGM2LCD(GPSStart);}
+	esito=GetGPSFix(GPSfix,PresentDay,GPStimer); //saving fix and time
 	bitWrite(InstrStatus,GPS_INDEX,esito);//write if GPS is OK
 	if (esito==1){
 		/*GPS ok, we set RTC time*/
@@ -809,6 +880,12 @@ void loop(){
 				break;
 			case 'Q': //Q acts as a handshake between ALS and python GUI
 				break;
+			case 'R':
+				WritePGM2LCD(RebootString);
+				WritePGM2Serial(RebootString,&Serial2);
+				Serial2.println(' ');
+				delay(1000);
+				resetFunc();
 			case 'S': //S for Status: how is the system doing?
 				SendInstrStatus();
 				break;
