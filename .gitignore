@@ -3,3 +3,4 @@
 /.vscode/**
 Doxyfile
 /Test/**
+.vscode/c_cpp_properties.json
