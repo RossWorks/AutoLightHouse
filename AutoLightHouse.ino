@@ -37,6 +37,7 @@
 #define GPS_TIMEOUT_INDEX 0
 #define SD_SAVE_INDEX 1
 #define NAME_INDEX 2
+#define LANTERN_INDEX 3
 
 #define T_INDEX 0
 #define p_INDEX 1
@@ -65,6 +66,7 @@ PROGMEM const char Splash[] =
 		"Automatic LighthouseSystem              RossWorks 2020";
 PROGMEM const char ShutDownMessage[]="Ready for shutdown";
 PROGMEM const char RebootString[]="Rebooting System...";
+PROGMEM const char ReadingSettings[]="Attempting to read settings file...\n";
 //GPS & RTC messages
 PROGMEM const char GPSStart[] = "Acquiring GPS signalplease wait";
 PROGMEM const char GPSOK[] = "GPS signal acquired syncing RTC";
@@ -123,9 +125,10 @@ PROGMEM const char DefaultDSTFile[13]="ZULU.DST";
 int GPSfix[7]={-360,61,61/*latitude*/,+360,61,61/*longitude*/,-1000/*height*/};
 unsigned int InstrStatus=0;
 byte SDinterval=SAVE_INTERVAL;
+byte GPStimeout=GPS_WAIT;
 unsigned long LastLCDWrite=0;
 char MyName[8+1] = "ALSunit";
-char LogfileName[13]="logfile.dat"; /**current logfile (8.3 name convention)*/
+const char LogfileName[13]="LOGFILE.DAT"; /**current logfile (8.3 name convention)*/
 char LanternFile[13]="DEFAULT.LNT"; /**current lantern file (8.3 filename)*/
 byte Lantern[LNT_LEN]={3}; /**current lantern pattern (1 byte/second)*/
 /*
@@ -354,7 +357,7 @@ void DSTperiod(const int year,DateTime *Start,DateTime *End){//ALL OK
 	*End=N2;
 }
 
-int GetGPSFix(int *position,unsigned int *time, byte GPStimeOut){//ALL OK
+int GetGPSFix(int *position,unsigned int *time,unsigned int GPStimeOut){//ALL OK
 /**
  * @brief this functions interpellates the GPS to get location fix & ZULU time
  * @return 1 if Fix is obtained, 0 if not
@@ -508,31 +511,40 @@ byte ReadGPStimeout(){
 	return GPS_WAIT;
 }
 
-byte ReadName(char* Name){
-	char buff='\0';
-	byte I=0;
-	myFile=SD.open(F("ALS.DAT"),FILE_READ);
-	if (myFile != NULL){
-		myFile.seek(NAME_INDEX);
-		for (I=0;I<8;I++){
-			buff=myFile.read();
-			if (buff != EOF){*(Name+I)=buff;}
-		}
-		*(Name+8)='\0';
-		myFile.close();
-	}
-	return I;
-}
-
-byte ReadSDinterval(){
-	byte interval=SAVE_INTERVAL;
+byte ReadSettings(){
+	char buff='A', Namebuff[9]={'\0'};
+	byte C=0,GPSbuff=0,SDbuff=0,i=0;
+	WritePGM2Serial(ReadingSettings,&Serial2);
 	myFile=SD.open(F("ALS.DAT"));
-	if (myFile != NULL){
-		myFile.seek(SD_SAVE_INDEX);
-		interval=myFile.read();
-		myFile.close();
-	}
-	return interval;
+	if (myFile==NULL){WritePGM2Serial(NoFile,&Serial2);return -1;}
+	do{
+		buff=myFile.read();
+		if (buff==','){C++;continue;}
+		if (buff==';'){break;}
+		if (buff==EOF){break;}
+		switch (C){
+			case GPS_TIMEOUT_INDEX: //reading GPS wait settings
+				GPSbuff*=10;
+				GPSbuff+=(buff-'0');
+				break;
+			case SD_SAVE_INDEX: //reading SD saving frequency
+				SDbuff*=10;
+				SDbuff+=(buff-'0');
+				break;
+			case NAME_INDEX: //reading unit name
+				*(Namebuff+i)=(char)buff;
+				i++;
+				break;
+			default:
+				WritePGM2Serial(NotWorkingEquip,&Serial2);
+				break;
+		}
+	}while(buff!=EOF);
+	*(Namebuff+8)='\0';
+	myFile.close();
+	GPStimeout=GPSbuff;
+	SDinterval=SDbuff;
+	for (i=0;i<9;i++){*(MyName+i)=*(Namebuff+i);}
 }
 
 void ReadFromPGM(char *pgm_pointer, char *outString){
@@ -596,12 +608,11 @@ void ShutDown(){
 }
 
 byte UpdateGPS(){
-	byte esito=0,GPStimer=GPS_WAIT;
+	byte esito=0;
 	unsigned int DateAndTime[6]={0};
 	LCD1.clear();
 	WritePGM2LCD(GPSStart);
-	GPStimer=ReadGPStimeout();
-	esito=GetGPSFix(GPSfix,DateAndTime,GPStimer);
+	esito=GetGPSFix(GPSfix,DateAndTime,GPStimeout);
 	if (esito==1){
 		RTC.adjust(DateTime(DateAndTime[0],DateAndTime[1],DateAndTime[2],
 						DateAndTime[3],DateAndTime[4],DateAndTime[5]));
@@ -646,8 +657,7 @@ void WeatherGPS2LCD(const float *weather, const DateTime *Ctime){
 	LCD1.print(LCD_text);
 }
 
-unsigned long Write2SD(const char *SDfile, const float *WeatherData,
-					   const DateTime *Nowadays){
+unsigned long Write2SD(const float *WeatherData, const DateTime *Nowadays){
 	/*A char array (Dumb) is created and filled with the
 	prototype of a log file line. Not the most elegant use of memory,
 	I will further optimize it
@@ -655,7 +665,7 @@ unsigned long Write2SD(const char *SDfile, const float *WeatherData,
 	char Dumb[40];
 	char FileString[40];
 	ReadFromPGM(LogFileRowProto,Dumb);
-	myFile=SD.open(SDfile,FILE_WRITE);//work as appending
+	myFile=SD.open(LogfileName,FILE_WRITE);//work as appending
 	sprintf(FileString,Dumb,
 	(int)*(WeatherData+T_INDEX),(int)*(WeatherData+p_INDEX),
 	(int)*(WeatherData+H_INDEX),
@@ -668,16 +678,11 @@ unsigned long Write2SD(const char *SDfile, const float *WeatherData,
 }
 
 void WriteAWR(const float *Wdata, const DateTime *Today,char *report){
-	char StationName[8];
 	char test;
 	byte i=0;
-	for (i=0;i<8;i++){
-	StationName[i]=(char)pgm_read_byte(MyName+i);
-	if (StationName[i]=='\0'){break;}
-	}
 	sprintf(report,
 			"%s %02i%02i%02i W%iS%i %+02i/%02i %i",
-			StationName,(*Today).day(),(*Today).hour(),(*Today).minute(),
+			MyName,(*Today).day(),(*Today).hour(),(*Today).minute(),
 			(int)*(Wdata+WD_INDEX),(int)*(Wdata+WS_INDEX),
 			(int)*(Wdata+T_INDEX),(int)*(Wdata+H_INDEX),(int)*(Wdata+p_INDEX));
 }
@@ -739,7 +744,7 @@ void setup(){
 	   the log file is unique and updated every time
 	*/
 	unsigned int PresentDay[6]={0};
-	byte esito=0,GPStimer=GPS_WAIT;
+	byte esito=0;
 	bool IsDST=0;
 	DateTime NowToday(2000,1,1,0,0,0);
 	float WeatherData[3]={0};
@@ -763,16 +768,15 @@ void setup(){
 	//SD init, false if failure
 	if (SD.begin()){
 		bitWrite(InstrStatus,SD_INDEX,1);
-		ReadLightSetting();
-		ReadName(MyName);}
+		ReadSettings();
+	}
 	else{bitWrite(InstrStatus,SD_INDEX,0);}
 	
 	//phase 2
-	//try to get gps timeout setting
-	GPStimer=ReadGPStimeout();
 	// I warn that we're waiting for GPS fix
 	if (bitRead(InstrStatus,LCD_INDEX)==1){WritePGM2LCD(GPSStart);}
-	esito=GetGPSFix(GPSfix,PresentDay,GPStimer); //saving fix and time
+	WritePGM2Serial(GPSStart,&Serial2);
+	esito=GetGPSFix(GPSfix,PresentDay,GPStimeout); //saving fix and time
 	bitWrite(InstrStatus,GPS_INDEX,esito);//write if GPS is OK
 	if (esito==1){
 		/*GPS ok, we set RTC time*/
@@ -803,11 +807,10 @@ void setup(){
 	//phase 5
 	esito=bitRead(InstrStatus,SD_INDEX);
 	if (esito==1){
-		ReadFromPGM(MyName,name);
 		myFile=SD.open(LogfileName,FILE_WRITE);
 		ReadFromPGM(LogFileHeaderProto,RowProto);
 		sprintf(LogFileText,RowProto,
-		name,NowToday.day(),NowToday.month(),NowToday.year(),
+		MyName,NowToday.day(),NowToday.month(),NowToday.year(),
 		NowToday.hour(),NowToday.minute(),NowToday.second());
 		myFile.println(LogFileText);
 		ReadFromPGM(LogFileHeaderProto2,RowProto);
@@ -831,16 +834,19 @@ void loop(){
 			 BMP180read(WeatherData+T_INDEX,WeatherData+p_INDEX));
 	//DHT22 read + test
 	bitWrite(InstrStatus,DHT_INDEX,DHTread(WeatherData+H_INDEX));
-	if ((millis()-LastLCDWrite)>=1000){ //if more than a sec has passed
-		WeatherGPS2LCD(WeatherData,&NowToday); //write to LCD
-		LastLCDWrite=millis();} //and save last time we updated LCD
+	if (bitRead(InstrStatus,LCD_INDEX)==1){
+		if ((millis()-LastLCDWrite)>=1000){ //if more than a sec has passed
+			WeatherGPS2LCD(WeatherData,&NowToday); //write to LCD
+			LastLCDWrite=millis();//and save last time we updated LCD
+		} 
+	}
 /*------------------------SD saving log file----------------------------------*/
 	if (SD.begin()){//first: is SD OK?
 		bitWrite(InstrStatus,SD_INDEX,1); //update SD fault flag
 		//then timing is checked
 		if ((NowToday.minute()==0) || ((NowToday.minute() % SAVE_INTERVAL)==0)){
 			if ((millis()-LastSDWrite)>6e4){//have we writed in the last minute?
-				LastSDWrite=Write2SD(LogfileName,WeatherData,&NowToday);
+				LastSDWrite=Write2SD(WeatherData,&NowToday);
 			}
 		}
 	}
